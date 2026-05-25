@@ -1,1 +1,98 @@
+name: Build and Release
 
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install RPM
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Configure
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          cmake -B build -D SOLVER_VERSION="${VERSION}" -DCPACK_GENERATOR="DEB;RPM"
+      - name: Build
+        run: cmake --build build
+      - name: Package
+        run: cmake --build build --target package
+      - name: Package source
+        run: cmake --build build --target package_source
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            build/*.deb
+            build/*.rpm
+            build/*.tar.gz
+            build/*.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install NSIS
+        run: choco install nsis -y
+      - name: Configure
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v',''
+          cmake -B build -D SOLVER_VERSION="$VERSION" -DCPACK_GENERATOR="NSIS"
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Package
+        run: |
+          cd build
+          cpack -G NSIS -C Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: build/*.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          cmake -B build -D SOLVER_VERSION="${VERSION}" -DCPACK_GENERATOR="DragNDrop"
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Package
+        run: |
+          cd build
+          cpack -G DragNDrop -C Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-packages
+          path: build/*.dmg
+
+  release:
+    needs: [build-linux, build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/')   
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: List packages
+        run: find artifacts -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.zip" -o -name "*.exe" -o -name "*.dmg" \) -exec ls -la {} \;
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
