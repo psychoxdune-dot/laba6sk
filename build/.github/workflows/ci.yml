@@ -1,1 +1,46 @@
+name: Build and Release
 
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install RPM tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Configure
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          cmake -B build -D SOLVER_VERSION="${VERSION}"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Package (binary)
+        run: cmake --build build --target package
+
+      - name: Package (source)
+        run: cmake --build build --target package_source
+
+      - name: List packages
+        run: ls -la build/*.{deb,rpm,tar.gz,zip} || true
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/*.deb
+            build/*.rpm
+            build/*.tar.gz
+            build/*.zip
+          generate_release_notes: true
